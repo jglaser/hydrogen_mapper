@@ -5,7 +5,7 @@ from intersect_sdk import (
     IntersectServiceConfig,
     default_intersect_lifecycle_loop,
 )
-from capability import ActiveLearningCapability
+from .capability import ActiveLearningCapability
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
