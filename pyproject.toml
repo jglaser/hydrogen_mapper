@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-example-pkg = "hydrogen_mapper:main"
+hydrogen_mapper = "hydrogen_mapper:main"
 
 [build-system]
 requires = ["uv_build>=0.9.3,<0.10.0"]
