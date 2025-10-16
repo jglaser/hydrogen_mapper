@@ -1,0 +1,15 @@
+intersect:
+  brokers:
+    - host: 'localhost'
+      username: 'intersect_username'
+      password: 'intersect_password'
+      port: 5672
+      protocol: 'amqp0.9.1'
+
+  hierarchy:
+    organization: my-org
+    facility: my-facility
+    system: active-learning
+    subsystem: hydrogen-mapper
+    service: neutron-phasing-service
+
