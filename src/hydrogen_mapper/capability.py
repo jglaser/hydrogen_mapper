@@ -27,6 +27,8 @@ class ActiveLearningCapability(IntersectBaseCapabilityImplementation):
             events_file=request.events_file,
             reflection_file=request.reflection_file,
             pdb_file=request.pdb_file,
+            polarization_files_csv='polarization_files.csv',  # Assuming a default name
+            mtz_array_label='I'  # Assuming a default label
         )
         self.sessions[session_id] = loop
         return session_id
@@ -54,11 +56,8 @@ class ActiveLearningCapability(IntersectBaseCapabilityImplementation):
         if not loop:
             raise ValueError("Session ID not found")
 
-        # This operation can be time-consuming, so it should run in a background thread
-        # For simplicity in this example, we run it synchronously
         loop.add_measurements(request.measurements)
 
-        # Emit an event with the new suggested measurement
         self.intersect_sdk_emit_event(
             'next_measurement_ready',
             NextMeasurementEvent(
