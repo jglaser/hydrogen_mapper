@@ -1,8 +1,15 @@
 # hydrogen_mapper
 An intersect service to map hydrogen from DNP neutron diffraction
 
-Run with 
+Run the command line tool with
 
 ```
 pixi run hydrogen_mapper
 ```
+
+Start the service with
+
+```
+pixi run python src/hydrogen_mapper/service.py
+```
+
