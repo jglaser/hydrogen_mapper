@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import gemmi
 from . import active_loop_gemmi_lib as al
 
 class ActiveLearningLoop:
@@ -45,15 +46,23 @@ class ActiveLearningLoop:
 
     def _calculate_next_step(self):
         """Runs one cycle of reconstruction and scoring."""
+        # 1. Reconstruct Map
         self.F_H = al.phase_retrieval_adam_direct(
-            self.measured_data, self.pool_data['phi_pol'].unique(), self.f_heavy_map
+            self.measured_data,
+            self.pool_data['phi_pol'].unique(),
+            self.f_heavy_map
         )
+
+        # 2. Estimate Uncertainty
         self.current_uncertainty = al.calculate_trace_of_covariance_direct_blocked(
             self.measured_data, self.F_H, self.f_heavy_map, self.n_voxels
         )
+
+        # 3. Score Candidates and Find Next State
         best_state = al.score_candidate_states_optimized(
             self.unmeasured_data, self.measured_data, self.F_H, self.f_heavy_map, self.n_voxels
         )
+
         if best_state is not None:
             self.next_state = {
                 "goniometer_angle": best_state['goniometer_angle'],

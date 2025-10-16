@@ -27,8 +27,8 @@ class ActiveLearningCapability(IntersectBaseCapabilityImplementation):
             events_file=request.events_file,
             reflection_file=request.reflection_file,
             pdb_file=request.pdb_file,
-            polarization_files_csv='polarization_files.csv',  # Assuming a default name
-            mtz_array_label='I'  # Assuming a default label
+            polarization_files_csv=request.polarization_files_csv, # Updated
+            mtz_array_label=request.mtz_array_label              # Updated
         )
         self.sessions[session_id] = loop
         return session_id

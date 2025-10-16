@@ -7,6 +7,8 @@ class StartLearningRequest(BaseModel):
     events_file: str
     reflection_file: str
     pdb_file: str
+    polarization_files_csv: str  # Added
+    mtz_array_label: str         # Added
 
 class Measurement(BaseModel):
     """A single measurement of intensity and sigma."""
