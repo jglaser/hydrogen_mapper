@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "gemmi>=0.7.3",
     "intersect-sdk>=0.8.3",
+    "jax>=0.5.0",
     "numpy>=2.3.4",
     "pandas>=2.3.3",
 ]
@@ -18,10 +19,26 @@ hydrogen_mapper = "hydrogen_mapper:main"
 requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
 
-[tool.uv.sources]
-cctbx-base = { index = "pypi-test" }
+[project.optional-dependencies]
+cuda = [
+  # Installs JAX with CUDA 12 support. Adjust the version as needed.
+  'jax[cuda12]>=0.7.2 ; sys_platform == "linux"',
+]
 
-[[tool.uv.index]]
-name = "pypi-test"
-url = "https://test.pypi.org/simple/"
-explicit = true
+rocm = [
+  # Installs JAX with ROCm support.
+  'jax[rocm]>=0.4.50 ; sys_platform == "linux"',
+]
+
+cpu = [
+  'jax',
+]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "cuda" },
+    { extra = "rocm" },
+  ],
+]
