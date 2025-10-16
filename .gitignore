@@ -205,6 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# INTERSECT config files
+config*.yaml
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml
