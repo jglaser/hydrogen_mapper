@@ -5,7 +5,6 @@ description = "Active learning loop to map hydrogen density from polarized neutr
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gemmi>=0.7.3",
     "intersect-sdk>=0.8.3",
     "jax>=0.5.0",
     "numpy>=2.3.4",
@@ -15,30 +14,31 @@ dependencies = [
 [project.scripts]
 hydrogen_mapper = "hydrogen_mapper:main"
 
-[build-system]
-requires = ["uv_build>=0.9.3,<0.10.0"]
-build-backend = "uv_build"
+[tool.pixi.feature.cuda]
+system-requirements = { cuda = "12.0" }
 
-[project.optional-dependencies]
-cuda = [
-  # Installs JAX with CUDA 12 support. Adjust the version as needed.
-  'jax[cuda12]>=0.7.2 ; sys_platform == "linux"',
-]
+[tool.pixi.feature.cuda.pypi-dependencies]
+jax = {version = ">=0.7.2", extras = ["cuda"]}
 
-rocm = [
-  # Installs JAX with ROCm support.
-  'jax[rocm]>=0.4.50 ; sys_platform == "linux"',
-]
+[tool.pixi.feature.rocm.dependencies]
+python = "<3.13"
+[tool.pixi.feature.rocm.pypi-dependencies]
+jax = {version = ">=0.5.0", extras = ["rocm"]}
 
-cpu = [
-  'jax',
-]
 
-[tool.uv]
-conflicts = [
-  [
-    { extra = "cpu" },
-    { extra = "cuda" },
-    { extra = "rocm" },
-  ],
-]
+[tool.pixi.feature.cpu.pypi-dependencies]
+jax = ">=0.7.2"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+hydrogen-mapper = { path = ".", editable = true }
+
+[tool.pixi.environments]
+cpu = { features = ["cpu"], solve-group = "default" }
+cuda = { features = ["cuda"] }
+rocm = { features = ["rocm"] }
+
+[tool.pixi.tasks]
