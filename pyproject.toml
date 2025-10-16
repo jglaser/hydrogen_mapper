@@ -5,6 +5,7 @@ description = "Active learning loop to map hydrogen density from polarized neutr
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "gemmi>=0.7.3",
     "intersect-sdk>=0.8.3",
     "numpy>=2.3.4",
     "pandas>=2.3.3",
@@ -17,3 +18,10 @@ hydrogen_mapper = "hydrogen_mapper:main"
 requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
 
+[tool.uv.sources]
+cctbx-base = { index = "pypi-test" }
+
+[[tool.uv.index]]
+name = "pypi-test"
+url = "https://test.pypi.org/simple/"
+explicit = true
