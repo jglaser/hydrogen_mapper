@@ -232,7 +232,7 @@ def cost_function_total(rho_H_grid, f_heavy, measured_phis, measured_Is, measure
     residuals = jnp.where(measured_sigIs > 0, (I_pred - measured_Is)**2 / (measured_sigIs**2 + 1e-9), 0)
     return jnp.sum(residuals)/jnp.sum(jnp.where(measured_sigIs > 0, 1/measured_sigIs**2, 0))
 
-@partial(jax.jit, static_argnums=('weight', 'max_iter'))
+@partial(jax.jit, static_argnames=('weight', 'max_iter'))
 def _tv_prox_jax(input_grid, weight, max_iter=50):
     """
     JAX implementation of TV-denoising prox operator.
