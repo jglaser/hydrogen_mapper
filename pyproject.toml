@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "intersect-sdk>=0.8.3",
     "jax>=0.5.0",
-    "numpy>=2.3.4",
+    "numpy>=2.3.3",
     "pandas>=2.3.3",
 ]
 
@@ -42,3 +42,6 @@ cuda = { features = ["cuda"] }
 rocm = { features = ["rocm"] }
 
 [tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+cctbx = ">=2025.9,<2026"
