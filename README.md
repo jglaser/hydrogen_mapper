@@ -4,7 +4,7 @@ An intersect service to map hydrogen from DNP neutron diffraction
 Run the command line tool with
 
 ```
-pixi run hydrogen_mapper
+pixi run [--environment cpu|rocm|cuda] hydrogen_mapper
 ```
 
 Start the service with

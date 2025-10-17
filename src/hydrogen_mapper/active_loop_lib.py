@@ -194,28 +194,23 @@ def _tv_prox_jax(input_grid, weight, max_iter=50):
 def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations=500, tol=1e-6,
                                 learning_rate=1e-4, beta1=0.9, beta2=0.999, epsilon=1e-8,
                                 lambda_tv=0.01, use_sysabs=False):
-    """Performs phase retrieval using the Adam optimizer."""
+    """
+    Performs phase retrieval using the Adam optimizer.
+    'measured_data' is now a list of miller.array objects.
+    """
     f_heavy, mask = to_numpy(f_heavy_arr, sys_abs=f_heavy_arr.crystal_symmetry().space_group_info() if use_sysabs else None, return_mask=True)
     f_heavy = jnp.array(f_heavy)
     mask = jnp.array(mask)
     indices = f_heavy_arr.indices()
-    
-    miller_arrays = []
-    for phi in phis:
-        phi_data = measured_data[measured_data['phi_pol'] == phi]
-        data = flex.double(len(indices), 0)
-        sigmas = flex.double(len(indices), -1)
-        # Create a lookup for hkl -> data/sigma
-        hkl_map = {tuple(row[['h','k','l']]): (row['I'], row['sigI']) for _, row in phi_data.iterrows()}
-        for i, hkl in enumerate(indices):
-            if hkl in hkl_map:
-                data[i], sigmas[i] = hkl_map[hkl]
-        miller_arrays.append(miller.array(f_heavy_arr.set(), data=data, sigmas=sigmas))
-    
-    nps = [to_numpy(a, return_sigma=True) for a in miller_arrays]
+
+    # The first argument 'measured_data' is now the list of miller_arrays
+    nps = [to_numpy(a, return_sigma=True) for a in measured_data]
     measured_Is = jnp.stack([jnp.abs(a[0]) for a in nps])
     measured_sigIs = jnp.stack([a[1] for a in nps])
+
     grad_fun = jax.jit(jax.grad(cost_function_total, argnums=0))
+
+    # ... (the rest of the Adam optimizer logic is the same)
     def adam_body_fun(carry, _):
         rho_H_grid, m, v, t = carry
         rho_H_prev_grid = rho_H_grid
@@ -234,13 +229,14 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations
         rho_H_grid_next = jnp.array(rho_H_final, dtype=jnp.complex64)
         error = jnp.linalg.norm(rho_H_grid_next - rho_H_prev_grid) / (jnp.linalg.norm(rho_H_prev_grid) + 1e-9)
         return (rho_H_grid_next, m_next, v_next, t_next), error
+
     rho_H_grid_init = jnp.zeros_like(f_heavy, dtype=jnp.complex64)
-    m_init = jnp.zeros_like(rho_H_grid_init)
-    v_init = jnp.zeros_like(rho_H_grid_init)
-    t_init = 0
+    m_init, v_init, t_init = jnp.zeros_like(rho_H_grid_init), jnp.zeros_like(rho_H_grid_init), 0
     initial_carry = (rho_H_grid_init, m_init, v_init, t_init)
+
     final_carry, _ = jax.lax.scan(adam_body_fun, initial_carry, None, length=num_iterations)
     final_rho_H_grid = final_carry[0]
+
     final_F_H_grid_jax = jnp.fft.fftn(final_rho_H_grid)
     final_F_H_grid_np = np.array(final_F_H_grid_jax, dtype=np.complex128)
     Fh_1d = np.array([final_F_H_grid_np[tuple(k)] for k in indices])
