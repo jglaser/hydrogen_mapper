@@ -223,9 +223,10 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations
         v_hat = v_next / (1 - beta2**t_next)
         update_step = learning_rate * m_hat / (jnp.sqrt(v_hat) + epsilon)
         rho_H_intermediate = rho_H_grid - update_step
-        rho_H_intermediate = rho_H_intermediate.real # real constraint
+        rho_H_intermediate = rho_H_intermediate.real
         rho_H_denoised = _tv_prox_jax(rho_H_intermediate, learning_rate * lambda_tv)
-        rho_H_grid_next = jnp.array(rho_H_denoised, dtype=jnp.complex64)
+        rho_H_final = jnp.maximum(rho_H_denoised, 0)
+        rho_H_grid_next = jnp.array(rho_H_final, dtype=jnp.complex64)
         error = jnp.linalg.norm(rho_H_grid_next - rho_H_prev_grid) / (jnp.linalg.norm(rho_H_prev_grid) + 1e-9)
         return (rho_H_grid_next, m_next, v_next, t_next), error
 
