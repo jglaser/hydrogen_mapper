@@ -19,13 +19,14 @@ class ActiveLearningLoop:
         xrs.switch_to_neutron_scattering_dictionary()
         f_heavy_calc = xrs.structure_factors(d_min=self.miller_set.d_min(), algorithm='direct').f_calc()
         f_heavy_calc, self.miller_set = f_heavy_calc.common_sets(other=self.miller_set)
-        
+
         p1_map = self.miller_set.expand_to_p1()
         self.f_heavy_map = f_heavy_calc.expand_to_p1()
+        self.grid = None
         map_shape = p1_map.fft_map(resolution_factor=1./3).real_map_unpadded().all()
         self.n_voxels = np.prod(map_shape)
         self.p1_indices = list(p1_map.indices())
-        
+
         self.f_h_only_ref = None
         if h_only_file:
             f_h_only_ref_native = any_reflection_file(h_only_file).as_miller_arrays()[0]
@@ -40,13 +41,13 @@ class ActiveLearningLoop:
         hkl_map_coverage = coverage_data['hkl_map']
         event_log = coverage_data['event_log']
         gonio_angles_to_search = np.unique(event_log[:, 0])
-        
+
         hkls_heavy = np.array(f_heavy_calc.indices())
         f_heavy_abs = np.array(f_heavy_calc.amplitudes().data())
         hkl_to_fheavy_map = {tuple(hkl): amp for hkl, amp in zip(hkls_heavy, f_heavy_abs)}
-        
+
         optimal_gonio_angle = al.find_optimal_initial_goniometer_angle(gonio_angles_to_search, hkl_map_coverage, event_log, hkl_to_fheavy_map)
-        
+
         self.next_state = {
             "goniometer_angle": optimal_gonio_angle,
             "phi_pol": self.pool_data['phi_pol'].unique()[0]
@@ -66,8 +67,8 @@ class ActiveLearningLoop:
 
     def _calculate_next_step(self):
         """Runs one cycle of reconstruction and scoring."""
-        self.F_H = al.phase_retrieval_adam_direct(
-            self.measured_data, self.pool_data['phi_pol'].unique(), self.f_heavy_map
+        self.F_H, self.grid = al.phase_retrieval_adam_direct(
+            self.measured_data, self.pool_data['phi_pol'].unique(), self.f_heavy_map, self.grid,
         )
         self.current_uncertainty = al.calculate_trace_of_covariance_direct_blocked(
             self.measured_data, self.F_H, self.f_heavy_map, self.p1_indices, self.n_voxels

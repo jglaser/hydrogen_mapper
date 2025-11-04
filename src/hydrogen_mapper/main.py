@@ -54,7 +54,8 @@ def main():
     parser.add_argument('--num_steps', type=int, default=50, help='Number of active learning steps to perform')
     parser.add_argument('--n_candidates', type=int, default=10, help='Number of candidates to score')
     parser.add_argument('--num_recon_iter', type=int, default=500, help='Number of iterations per map reconstruction')
-    parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate for Adam optimizer')
+    parser.add_argument('--learning_rate', type=float, default=5e-4, help='Learning rate for Adam optimizer')
+    parser.add_argument('--oversampling_factor', type=float, default=1.0, help='How many times the density grid is oversampled')
     parser.add_argument('--mtz_out', type=str, default=None, help='.mtz (structure factor) output filename prefix')
     parser.add_argument('--mrc_out', type=str, default=None, help='.mrc (H density map) output filename prefix')
     args = parser.parse_args()
@@ -118,9 +119,10 @@ def main():
     measured_data = pool_data[seed_mask].copy()
     unmeasured_data = pool_data.drop(measured_data.index)
 
+    grid = None
     for step in range(args.num_steps):
         print(f"--- Step {step+1}/{args.num_steps} ---")
-        
+
         # Correctly create miller_arrays from the measured_data DataFrame
         miller_arrays = []
         indices = miller_set.indices()
@@ -131,17 +133,19 @@ def main():
             sigI = [ sigI_hkl.get((tuple(k), phi), -1) for k in indices ]
             m = miller.array(miller_set, data=flex.double(I), sigmas=flex.double(sigI))
             miller_arrays.append(m)
-        
-        F_H = al.phase_retrieval_adam_direct(miller_arrays, measured_data['phi_pol'].unique(), f_heavy_map, num_iterations=args.num_recon_iter, learning_rate=args.learning_rate)
-        
+
+        F_H, grid = al.phase_retrieval_adam_direct(miller_arrays, measured_data['phi_pol'].unique(), f_heavy_map, grid,
+                                                   num_iterations=args.num_recon_iter, learning_rate=args.learning_rate,
+                                                   oversampling_factor=args.oversampling_factor)
+
         if args.h_only_file:
             calculate_validation_metrics(F_H, f_h_only_ref, miller_set)
-        
+
         current_uncertainty = al.calculate_trace_of_covariance_direct_blocked(measured_data, F_H, f_heavy_map, p1_indices, n_voxels)
-        
+
         if len(unmeasured_data) == 0:
             break
-            
+
         best_state = al.score_candidate_states_optimized(unmeasured_data, measured_data, F_H, f_heavy_map, p1_indices, n_voxels)
 
         if best_state is not None:

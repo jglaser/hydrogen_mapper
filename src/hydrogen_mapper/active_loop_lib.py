@@ -139,7 +139,7 @@ def calculate_trace_of_covariance_direct_blocked(measured_data, F_H_map, f_heavy
     M = len(const_list)
     return float(((n_voxels - M) / epsilon) + ((1.0 / epsilon) * total_trace_contrib))
 
-def to_numpy(F, sys_abs=None, return_sigma=False, return_mask=False):
+def to_numpy(F, return_sigma=False):
     """Convert Miller array to numpy fft array"""
     F = F.expand_to_p1()
     if not F.anomalous_flag():
@@ -148,21 +148,16 @@ def to_numpy(F, sys_abs=None, return_sigma=False, return_mask=False):
     h_max=np.max(indices, axis=0)
     x,y,z=2*np.abs(h_max)+1
     a=np.zeros((x,y,z),dtype=np.complex64)
-    if return_mask:
-        mask=np.ones(shape=(x,y,z), dtype=np.float32)
-        if sys_abs is not None:
-            for k in zip(sys_abs.indices()):
-                mask[tuple(k)]=0
     if return_sigma:
         sigma=np.full(shape=(x,y,z), fill_value=-1, dtype=np.float32)
         for k,v,s in zip(indices, F.data(), F.sigmas()):
             a[tuple(k)]=v
             sigma[tuple(k)]=s
-        return (a, sigma, mask) if return_mask else (a, sigma)
+        return (a, sigma)
     else:
         for k,v in zip(indices, F.data()):
             a[tuple(k)]=v
-        return (a, mask) if return_mask else a
+        return a
 
 def cost_function_total(rho_H_grid, f_heavy, measured_phis, measured_Is, measured_sigIs):
     """Computes the scalar data-fidelity cost from a TOTAL real-space density grid."""
@@ -191,22 +186,35 @@ def _tv_prox_jax(input_grid, weight, max_iter=50):
         final_grad_div_p += jnp.roll(p_final[..., i], -1, axis=i) - p_final[..., i]
     return input_grid - final_grad_div_p
 
-def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations=500, tol=1e-6,
+def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
+                                grid=None, num_iterations=500, tol=1e-6,
                                 learning_rate=1e-4, beta1=0.9, beta2=0.999, epsilon=1e-8,
-                                lambda_tv=0.01, use_sysabs=False):
+                                lambda_tv=0.01, oversampling_factor=1.0):
     """
     Performs phase retrieval using the Adam optimizer.
     'measured_data' is now a list of miller.array objects.
     """
-    f_heavy, mask = to_numpy(f_heavy_arr, sys_abs=f_heavy_arr.crystal_symmetry().space_group_info() if use_sysabs else None, return_mask=True)
-    f_heavy = jnp.array(f_heavy)
-    mask = jnp.array(mask)
+    f_heavy = jnp.array(to_numpy(f_heavy_arr))
     indices = f_heavy_arr.indices()
+
+    if grid is None:
+        grid_shape = f_heavy.shape
+        grid_shape = tuple([int(g*oversampling_factor) for g in grid_shape])
+    else:
+        grid_shape = grid.shape
 
     # The first argument 'measured_data' is now the list of miller_arrays
     nps = [to_numpy(a, return_sigma=True) for a in measured_data]
-    measured_Is = jnp.stack([jnp.abs(a[0]) for a in nps])
-    measured_sigIs = jnp.stack([a[1] for a in nps])
+    measured_Is = [jnp.abs(a[0]) for a in nps]
+    measured_sigIs = [a[1] for a in nps]
+
+    l_pad = tuple((g_new - g) // 2 + (g_new - g) % 2 for g_new, g in zip(grid_shape, f_heavy.shape))
+    r_pad = tuple((g_new - g) // 2 for g_new, g in zip(grid_shape, f_heavy.shape))
+    pad = tuple((l,r) for l, r in zip(l_pad, r_pad))
+
+    f_heavy = jnp.fft.ifftshift(jnp.pad(jnp.fft.fftshift(f_heavy), pad))
+    measured_Is = jnp.stack([jnp.fft.ifftshift(jnp.pad(jnp.fft.fftshift(I), pad)) for I in measured_Is])
+    measured_sigIs = jnp.stack([jnp.fft.ifftshift(jnp.pad(jnp.fft.fftshift(sigI), pad, constant_values=-1)) for sigI in measured_sigIs])
 
     grad_fun = jax.jit(jax.grad(cost_function_total, argnums=0))
 
@@ -215,9 +223,8 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations
         rho_H_grid, m, v, t = carry
         rho_H_prev_grid = rho_H_grid
         grad_rho_H_grid = grad_fun(rho_H_grid, f_heavy, phis, measured_Is, measured_sigIs)
-        grad_rho_H_grid_masked = grad_rho_H_grid * mask
-        m_next = beta1 * m + (1 - beta1) * grad_rho_H_grid_masked
-        v_next = beta2 * v + (1 - beta2) * jnp.square(grad_rho_H_grid_masked)
+        m_next = beta1 * m + (1 - beta1) * grad_rho_H_grid
+        v_next = beta2 * v + (1 - beta2) * jnp.square(grad_rho_H_grid)
         t_next = t + 1
         m_hat = m_next / (1 - beta1**t_next)
         v_hat = v_next / (1 - beta2**t_next)
@@ -230,7 +237,11 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations
         error = jnp.linalg.norm(rho_H_grid_next - rho_H_prev_grid) / (jnp.linalg.norm(rho_H_prev_grid) + 1e-9)
         return (rho_H_grid_next, m_next, v_next, t_next), error
 
-    rho_H_grid_init = jnp.zeros_like(f_heavy, dtype=jnp.complex64)
+    if grid is None:
+        rho_H_grid_init = jnp.zeros(shape=grid_shape, dtype=jnp.complex64)
+    else:
+        rho_H_grid_init = jnp.array(grid)
+
     m_init, v_init, t_init = jnp.zeros_like(rho_H_grid_init), jnp.zeros_like(rho_H_grid_init), 0
     initial_carry = (rho_H_grid_init, m_init, v_init, t_init)
 
@@ -240,7 +251,7 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, num_iterations
     final_F_H_grid_jax = jnp.fft.fftn(final_rho_H_grid)
     final_F_H_grid_np = np.array(final_F_H_grid_jax, dtype=np.complex128)
     Fh_1d = np.array([final_F_H_grid_np[tuple(k)] for k in indices])
-    return miller.array(f_heavy_arr.set(), data=flex.complex_double(Fh_1d))
+    return miller.array(f_heavy_arr.set(), data=flex.complex_double(Fh_1d)), final_rho_H_grid
 
 def prepare_friedel_groups(data, F_H_map, f_heavy_map, p1_indices):
     """Processes a DataFrame of measurements into a dictionary of Friedel groups."""
