@@ -42,35 +42,9 @@ def load_full_dataset(csv_path, mtz_array_label):
             'I': list(intensities.data()),
             'sigI': list(sigIs)
         })
+        df_mtz['hkl'] = list(zip(df_mtz['h'], df_mtz['k'], df_mtz['l']))
         all_data.append(df_mtz)
     return pd.concat(all_data, ignore_index=True)
-
-def find_optimal_initial_goniometer_angle(gonio_angles, hkl_map, event_log, hkl_to_fheavy_map):
-    """
-    Finds the optimal initial goniometer angle by minimizing the average
-    heavy-atom amplitude of covered reflections.
-    """
-    best_gonio_angle = None
-    best_score = float('inf')
-    event_log = event_log[event_log[:, 0].argsort()]
-    for gonio_angle in np.sort(gonio_angles):
-        covered_hkls_at_angle = set()
-        event_idx = 0
-        while event_idx < len(event_log) and event_log[event_idx, 0] <= gonio_angle:
-            _, event_type, hkl_id = event_log[event_idx]
-            hkl = tuple(hkl_map[int(hkl_id)])
-            if event_type == 1:
-                covered_hkls_at_angle.add(hkl)
-            else:
-                covered_hkls_at_angle.discard(hkl)
-            event_idx += 1
-        if not covered_hkls_at_angle: continue
-        amplitudes = [hkl_to_fheavy_map[hkl] for hkl in covered_hkls_at_angle if hkl in hkl_to_fheavy_map]
-        if not amplitudes: continue
-        score = np.mean(amplitudes)
-        if score < best_score:
-            best_score, best_gonio_angle = score, gonio_angle
-    return best_gonio_angle
 
 def get_jacobian_constants_and_weights_direct(measured_data, F_H_map, f_heavy_map, p1_indices):
     """
@@ -78,10 +52,16 @@ def get_jacobian_constants_and_weights_direct(measured_data, F_H_map, f_heavy_ma
     """
     p1_hkl_to_idx = {hkl: i for i, hkl in enumerate(p1_indices)}
     const_list, weight_list, hkl_list = [], [], []
+
     F_H_np = F_H_map.data().as_numpy_array()
     f_heavy_np = f_heavy_map.data().as_numpy_array()
+
+    # Ensure hkl column exists and is tuple
+    if 'hkl' not in measured_data.columns and not measured_data.empty:
+        measured_data['hkl'] = measured_data[['h','k','l']].apply(tuple, axis=1)
+
     for _, row in measured_data.iterrows():
-        hkl = (row['h'], row['k'], row['l'])
+        hkl = row['hkl'] # Use the tuple directly
         idx = p1_hkl_to_idx.get(hkl)
         if idx is None: continue
         phi_pol = row['phi_pol']
@@ -269,56 +249,3 @@ def prepare_friedel_groups(data, F_H_map, f_heavy_map, p1_indices):
         friedel_groups[key]['weights'].append(weight_list[i])
         friedel_groups[key]['hkls'].append(hkl_list[i])
     return friedel_groups
-
-def score_candidate_states_optimized(unmeasured_data, measured_data, F_H_map, f_heavy_map, p1_indices, n_voxels, epsilon=1.0, n_candidates=10):
-    """Scores candidate states by efficiently calculating the change in the trace of the covariance matrix."""
-    base_groups = prepare_friedel_groups(measured_data, F_H_map, f_heavy_map, p1_indices)
-    base_trace_contributions = {}
-    total_trace_contrib_base = 0.0
-    M_base = 0
-    for key, group_data in base_groups.items():
-        const_block = jnp.array(group_data['consts'])
-        weight_block = jnp.array(group_data['weights'])
-        hkls_in_block = jnp.array(group_data['hkls'])
-        M_base += len(const_block)
-        trace_contrib = _calculate_block_trace_jax(const_block, weight_block, n_voxels, hkls_in_block, epsilon)
-        base_trace_contributions[key] = trace_contrib
-        total_trace_contrib_base += trace_contrib
-    trace_base = ((n_voxels - M_base) / epsilon) + ((1.0 / epsilon) * total_trace_contrib_base)
-    if np.isinf(trace_base) or M_base == 0:
-        candidate_states = unmeasured_data[['goniometer_angle', 'phi_pol']].drop_duplicates()
-        return None if candidate_states.empty else candidate_states.sample(n=1).iloc[0]
-    best_state = None
-    min_predicted_trace = trace_base
-    candidate_states = unmeasured_data[['goniometer_angle', 'phi_pol']].drop_duplicates()
-    states_to_check = candidate_states.sample(n=min(n_candidates, len(candidate_states)))
-    for _, state in states_to_check.iterrows():
-        gonio_angle, phi_pol = state['goniometer_angle'], state['phi_pol']
-        batch_to_add = unmeasured_data[(unmeasured_data['goniometer_angle'] == gonio_angle) & (unmeasured_data['phi_pol'] == phi_pol)]
-        if batch_to_add.empty: continue
-        candidate_groups = prepare_friedel_groups(batch_to_add, F_H_map, f_heavy_map, p1_indices)
-        predicted_trace_contrib_total = total_trace_contrib_base
-        M_candidate = M_base + len(batch_to_add)
-        for key, cand_group_data in candidate_groups.items():
-            old_trace_contrib = base_trace_contributions.get(key, 0.0)
-            if key in base_groups:
-                base_group_data = base_groups[key]
-                combined_consts = base_group_data['consts'] + cand_group_data['consts']
-                combined_weights = base_group_data['weights'] + cand_group_data['weights']
-                combined_hkls = base_group_data['hkls'] + cand_group_data['hkls']
-            else:
-                combined_consts = cand_group_data['consts']
-                combined_weights = cand_group_data['weights']
-                combined_hkls = cand_group_data['hkls']
-            const_block_new = jnp.array(combined_consts)
-            weight_block_new = jnp.array(combined_weights)
-            hkls_in_block_new = jnp.array(combined_hkls)
-            new_trace_contrib = _calculate_block_trace_jax(const_block_new, weight_block_new, n_voxels, hkls_in_block_new, epsilon)
-            predicted_trace_contrib_total += (new_trace_contrib - old_trace_contrib)
-        predicted_trace = ((n_voxels - M_candidate) / epsilon) + ((1.0 / epsilon) * predicted_trace_contrib_total)
-        if predicted_trace < min_predicted_trace:
-            min_predicted_trace = predicted_trace
-            best_state = state
-    if best_state is None:
-        return states_to_check.iloc[0]
-    return best_state

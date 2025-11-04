@@ -4,11 +4,11 @@ import uuid
 
 class StartLearningRequest(BaseModel):
     """Input for starting a new active learning session."""
-    events_file: str
+    instrument_mask_file: str
     reflection_file: str
     pdb_file: str
-    polarization_files_csv: str  # Added
-    mtz_array_label: str         # Added
+    polarization_files_csv: str
+    mtz_array_label: str
 
 class Measurement(BaseModel):
     """A single measurement of intensity and sigma."""
@@ -25,13 +25,15 @@ class ExperimentState(BaseModel):
     session_id: uuid.UUID
     status: str
     total_measurements: int
-    next_goniometer_angle: Optional[float] = None
+    next_goniometer_angle: Optional[float] = None # Stub field
     next_polarization_state: Optional[float] = None
     uncertainty: Optional[float] = None
+    next_rotation_matrix: Optional[List[List[float]]] = None # <-- ADDED
 
 class NextMeasurementEvent(BaseModel):
     """Event emitted when a new measurement is suggested."""
     session_id: uuid.UUID
-    goniometer_angle: float
+    goniometer_angle: Optional[float] = None # <-- MADE OPTIONAL
+    rotation_matrix: Optional[List[List[float]]] = None # <-- ADDED
     polarization_state: float
     estimated_uncertainty: float
