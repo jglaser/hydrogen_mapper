@@ -24,14 +24,17 @@ def load_full_dataset(csv_path, mtz_array_label):
         reader = any_reflection_file(mtz_file)
         miller_arrays = reader.as_miller_arrays(merge_equivalents=False)
         intensities = None
+        columns = []
         for array in miller_arrays:
-            if array.info().label_string() == mtz_array_label:
+            column_name = array.info().label_string()
+            columns += [column_name]
+            if column_name == mtz_array_label:
                 if not array.is_xray_intensity_array():
                     array = array.as_intensity_array()
                 intensities = array
                 break
         if intensities is None:
-            raise ValueError(f"Array '{mtz_array_label}' not found in {mtz_file}")
+            raise ValueError(f"Array '{mtz_array_label}' not found in {mtz_file}, Available columns: {columns}")
         indices = intensities.indices()
         sigIs = intensities.sigmas() if intensities.sigmas() is not None else flex.double(intensities.data().size(), 1.0)
         df_mtz = pd.DataFrame({
