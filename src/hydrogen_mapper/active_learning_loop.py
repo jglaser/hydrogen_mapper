@@ -106,6 +106,7 @@ class ActiveLearningLoop:
         self.current_uncertainty = float('inf')
         self.F_H = None
         self.H_grid = None
+        self.k_scales = None
         self.is_first_step = True
         self._calculate_next_step()
 
@@ -171,15 +172,16 @@ class ActiveLearningLoop:
             m = miller.array(self.miller_set, data=flex.double(I), sigmas=flex.double(sigI))
             miller_arrays.append(m)
 
-        self.F_H, self.H_grid = al.phase_retrieval_adam_direct(
-            miller_arrays, self.polarization_states, self.f_heavy_map, grid=self.H_grid,
+        self.F_H, self.H_grid, self.k_scales = al.phase_retrieval_adam_direct(
+            miller_arrays, self.polarization_states, self.f_heavy_map,
+            grid=self.H_grid, k_scales=self.k_scales,
         )
-        
+
         # 2. Calculate Current Uncertainty
         self.current_uncertainty = al.calculate_trace_of_covariance_direct_blocked(
             self.measured_data, self.F_H, self.f_heavy_map, self.p1_indices, self.n_voxels
         )
-        
+
         # 3. Score Candidates
         self._score_candidate_orientations()
 

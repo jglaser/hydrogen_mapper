@@ -142,11 +142,13 @@ def to_numpy(F, return_sigma=False):
             a[tuple(k)]=v
         return a
 
-def cost_function_total(rho_H_grid, f_heavy, measured_phis, measured_Is, measured_sigIs):
+def cost_function_total(rho_H_grid, k_scales, f_heavy, measured_phis, measured_Is, measured_sigIs):
     """Computes the scalar data-fidelity cost from a TOTAL real-space density grid."""
     F_H_grid = jnp.fft.fftn(rho_H_grid)
     F_tot_q_pred = jnp.stack([f_heavy + phi * F_H_grid for phi in measured_phis])
-    I_pred = jnp.abs(F_tot_q_pred)**2
+    I_calc = jnp.abs(F_tot_q_pred)**2
+    k_scales_broadcast = jnp.expand_dims(k_scales, axis=tuple(range(1, F_H_grid.ndim + 1)))
+    I_pred = k_scales_broadcast * I_calc
     residuals = jnp.where(measured_sigIs > 0, (I_pred - measured_Is)**2 / (measured_sigIs**2 + 1e-9), 0)
     return jnp.sum(residuals)/jnp.sum(jnp.where(measured_sigIs > 0, 1/measured_sigIs**2, 0))
 
@@ -170,7 +172,7 @@ def _tv_prox_jax(input_grid, weight, max_iter=50):
     return input_grid - final_grad_div_p
 
 def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
-                                grid=None, num_iterations=500, tol=1e-6,
+                                grid=None, k_scales=None, num_iterations=500, tol=1e-6,
                                 learning_rate=1e-4, beta1=0.9, beta2=0.999, epsilon=1e-8,
                                 lambda_tv=0.01, oversampling_factor=1.0):
     """
@@ -199,42 +201,59 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
     measured_Is = jnp.stack([jnp.fft.ifftshift(jnp.pad(jnp.fft.fftshift(I), pad)) for I in measured_Is])
     measured_sigIs = jnp.stack([jnp.fft.ifftshift(jnp.pad(jnp.fft.fftshift(sigI), pad, constant_values=-1)) for sigI in measured_sigIs])
 
-    grad_fun = jax.jit(jax.grad(cost_function_total, argnums=0))
+    grad_fun = jax.jit(jax.grad(cost_function_total, argnums=(0,1)))
 
     # ... (the rest of the Adam optimizer logic is the same)
     def adam_body_fun(carry, _):
-        rho_H_grid, m, v, t = carry
+        rho_H_grid, k_scales, m_F, v_F, m_k, v_k, t = carry
         rho_H_prev_grid = rho_H_grid
-        grad_rho_H_grid = grad_fun(rho_H_grid, f_heavy, phis, measured_Is, measured_sigIs)
-        m_next = beta1 * m + (1 - beta1) * grad_rho_H_grid
-        v_next = beta2 * v + (1 - beta2) * jnp.square(grad_rho_H_grid)
+        grad_rho_H_grid, grad_k_scales = grad_fun(rho_H_grid, k_scales, f_heavy, phis, measured_Is, measured_sigIs)
+        m_F_next = beta1 * m_F + (1 - beta1) * grad_rho_H_grid
+        v_F_next = beta2 * v_F + (1 - beta2) * jnp.square(grad_rho_H_grid)
         t_next = t + 1
-        m_hat = m_next / (1 - beta1**t_next)
-        v_hat = v_next / (1 - beta2**t_next)
-        update_step = learning_rate * m_hat / (jnp.sqrt(v_hat) + epsilon)
+        m_F_hat = m_F_next / (1 - beta1**t_next)
+        v_F_hat = v_F_next / (1 - beta2**t_next)
+        update_step = learning_rate * m_F_hat / (jnp.sqrt(v_F_hat) + epsilon)
         rho_H_intermediate = rho_H_grid - update_step
         rho_H_intermediate = rho_H_intermediate.real
         rho_H_denoised = _tv_prox_jax(rho_H_intermediate, learning_rate * lambda_tv)
         rho_H_final = jnp.maximum(rho_H_denoised, 0)
         rho_H_grid_next = jnp.array(rho_H_final, dtype=jnp.complex64)
+
+        # --- Adam update for k_scales ---
+        m_k_next = beta1 * m_k + (1 - beta1) * grad_k_scales
+        v_k_next = beta2 * v_k + (1 - beta2) * jnp.square(grad_k_scales)
+        m_k_hat = m_k_next / (1 - beta1**t_next)
+        v_k_hat = v_k_next / (1 - beta2**t_next)
+        update_step_k = learning_rate * m_k_hat / (jnp.sqrt(v_k_hat) + epsilon)
+        k_scales_intermediate = k_scales - update_step_k
+
+        # Add positivity constraint for scale factors
+        k_scales_next = jnp.maximum(k_scales_intermediate, 1e-8)
+
         error = jnp.linalg.norm(rho_H_grid_next - rho_H_prev_grid) / (jnp.linalg.norm(rho_H_prev_grid) + 1e-9)
-        return (rho_H_grid_next, m_next, v_next, t_next), error
+        return (rho_H_grid_next, k_scales_next, m_F_next, v_F_next, m_k_next, v_k_next, t_next), error
 
     if grid is None:
         rho_H_grid_init = jnp.zeros(shape=grid_shape, dtype=jnp.complex64)
+        k_scales_init = jnp.ones(shape=measured_Is.shape[0])
     else:
         rho_H_grid_init = jnp.array(grid)
+        k_scales_init = jnp.array(k_scales)
 
-    m_init, v_init, t_init = jnp.zeros_like(rho_H_grid_init), jnp.zeros_like(rho_H_grid_init), 0
-    initial_carry = (rho_H_grid_init, m_init, v_init, t_init)
+    t_init = 0
+    m_F_init, v_F_init = jnp.zeros_like(rho_H_grid_init), jnp.zeros_like(rho_H_grid_init)
+    m_k_init, v_k_init = jnp.zeros_like(k_scales_init), jnp.zeros_like(k_scales_init)
+    initial_carry = (rho_H_grid_init, k_scales_init, m_F_init, v_F_init, m_k_init, v_k_init, t_init)
 
     final_carry, _ = jax.lax.scan(adam_body_fun, initial_carry, None, length=num_iterations)
     final_rho_H_grid = final_carry[0]
+    final_k_scales = final_carry[1]
 
     final_F_H_grid_jax = jnp.fft.fftn(final_rho_H_grid)
     final_F_H_grid_np = np.array(final_F_H_grid_jax, dtype=np.complex128)
     Fh_1d = np.array([final_F_H_grid_np[tuple(k)] for k in indices])
-    return miller.array(f_heavy_arr.set(), data=flex.complex_double(Fh_1d)), final_rho_H_grid
+    return miller.array(f_heavy_arr.set(), data=flex.complex_double(Fh_1d)), final_rho_H_grid, final_k_scales
 
 def prepare_friedel_groups(data, F_H_map, f_heavy_map, p1_indices):
     """Processes a DataFrame of measurements into a dictionary of Friedel groups."""
