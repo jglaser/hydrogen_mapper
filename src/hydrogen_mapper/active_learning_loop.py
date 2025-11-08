@@ -53,13 +53,13 @@ class CoverageCalculator:
         Calculates the set of covered HKLs for a given R and U matrix.
         """
         RUB_inv = np.linalg.inv(R @ U @ self.B)
-        
+
         # Map instrument coverage to hkl space
         # Q_lab is (3, N), RUB_inv is (3, 3)
         hkl_cov_raw = np.einsum('ij,jk->ik', RUB_inv / (2 * np.pi), self.Q_lab).round(0).astype(int).T
-        
+
         current_hkl_set = set(map(tuple, np.unique(hkl_cov_raw, axis=0)))
-        
+
         # Intersect with the full list of possible hkls
         return current_hkl_set.intersection(self.hkls_all_set)
 
@@ -124,7 +124,7 @@ class ActiveLearningLoop:
 
         # Find the data corresponding to this state
         covered_hkls = self.coverage_calculator.get_covered_hkls(R, self.U)
-        
+
         batch_mask = (self.unmeasured_data['hkl'].isin(covered_hkls)) & \
                      (self.unmeasured_data['phi_pol'] == phi_pol)
 
@@ -187,7 +187,7 @@ class ActiveLearningLoop:
 
     def _score_candidate_orientations(self, n_candidates=20, epsilon=1.0):
         """Scores candidate states by efficiently calculating the change in the trace of the covariance matrix."""
-        
+
         # Get baseline uncertainty contributions
         base_groups = al.prepare_friedel_groups(self.measured_data, self.F_H, self.f_heavy_map, self.p1_indices)
         base_trace_contributions = {}
@@ -201,16 +201,16 @@ class ActiveLearningLoop:
             trace_contrib = al._calculate_block_trace_jax(const_block, weight_block, self.n_voxels, hkls_in_block, epsilon)
             base_trace_contributions[key] = trace_contrib
             total_trace_contrib_base += trace_contrib
-        
+
         trace_base = ((self.n_voxels - M_base) / epsilon) + ((1.0 / epsilon) * total_trace_contrib_base)
-        
+
         best_state = None
         min_predicted_trace = trace_base
 
         for _ in range(n_candidates):
             R_cand = self._generate_random_rotation()
             covered_hkls = self.coverage_calculator.get_covered_hkls(R_cand, self.U)
-            
+
             for phi_pol in self.polarization_states:
                 batch_mask = (self.unmeasured_data['hkl'].isin(covered_hkls)) & \
                              (self.unmeasured_data['phi_pol'] == phi_pol)
@@ -226,7 +226,7 @@ class ActiveLearningLoop:
 
                 for key, cand_group_data in candidate_groups.items():
                     old_trace_contrib = base_trace_contributions.get(key, 0.0)
-                    
+
                     if key in base_groups:
                         base_group_data = base_groups[key]
                         combined_consts = base_group_data['consts'] + cand_group_data['consts']

@@ -217,8 +217,7 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
         rho_H_intermediate = rho_H_grid - update_step
         rho_H_intermediate = rho_H_intermediate.real
         rho_H_denoised = _tv_prox_jax(rho_H_intermediate, learning_rate * lambda_tv)
-        rho_H_final = jnp.maximum(rho_H_denoised, 0)
-        rho_H_grid_next = jnp.array(rho_H_final, dtype=jnp.complex64)
+        rho_H_grid_next = jnp.array(rho_H_denoised, dtype=jnp.complex64)
 
         # --- Adam update for k_scales ---
         m_k_next = beta1 * m_k + (1 - beta1) * grad_k_scales
