@@ -142,15 +142,22 @@ def to_numpy(F, return_sigma=False):
             a[tuple(k)]=v
         return a
 
-def cost_function_total(rho_H_grid, k_scales, f_heavy, measured_phis, measured_Is, measured_sigIs):
+def cost_function_total(rho_H_grid, k_scales, f_heavy, measured_phis, measured_Is, measured_sigIs,
+                        IsigI_cutoff=None):
     """Computes the scalar data-fidelity cost from a TOTAL real-space density grid."""
     F_H_grid = jnp.fft.fftn(rho_H_grid)
     F_tot_q_pred = jnp.stack([f_heavy + phi * F_H_grid for phi in measured_phis])
     I_calc = jnp.abs(F_tot_q_pred)**2
     k_scales_broadcast = jnp.expand_dims(k_scales, axis=tuple(range(1, F_H_grid.ndim + 1)))
     I_pred = jnp.exp(k_scales_broadcast) * I_calc
-    residuals = jnp.where(measured_sigIs > 0, (I_pred - measured_Is)**2 / (measured_sigIs**2 + 1e-9), 0)
-    return jnp.sum(residuals)/jnp.sum(jnp.where(measured_sigIs > 0, 1/measured_sigIs**2, 0))
+    if IsigI_cutoff is not None:
+        f = measured_Is > IsigI_cutoff * measured_sigIs
+    else:
+        f = jnp.ones_like(measured_Is, dtype=bool)
+
+    residuals = jnp.where(f & (measured_sigIs > 0), (I_pred - measured_Is)**2, 0)
+    weights = jnp.where(f & (measured_sigIs > 0), 1 / (measured_sigIs**2 + 1e-9), 0)
+    return jnp.sum(weights*residuals)/jnp.sum(weights)
 
 @partial(jax.jit, static_argnames=('weight', 'max_iter'))
 def _tv_prox_jax(input_grid, weight, max_iter=50):
@@ -174,7 +181,8 @@ def _tv_prox_jax(input_grid, weight, max_iter=50):
 def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
                                 grid=None, k_scales=None, num_iterations=500, tol=1e-6,
                                 learning_rate=1e-4, beta1=0.9, beta2=0.999, epsilon=1e-8,
-                                lambda_tv=0.01, oversampling_factor=1.0):
+                                lambda_tv=0.01, oversampling_factor=1.0,
+                                IsigI_cutoff=None):
     """
     Performs phase retrieval using the Adam optimizer.
     'measured_data' is now a list of miller.array objects.
@@ -203,11 +211,11 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
 
     grad_fun = jax.jit(jax.grad(cost_function_total, argnums=(0,1)))
 
-    # ... (the rest of the Adam optimizer logic is the same)
     def adam_body_fun(carry, _):
         rho_H_grid, k_scales, m_F, v_F, m_k, v_k, t = carry
         rho_H_prev_grid = rho_H_grid
-        grad_rho_H_grid, grad_k_scales = grad_fun(rho_H_grid, k_scales, f_heavy, phis, measured_Is, measured_sigIs)
+        grad_rho_H_grid, grad_k_scales = grad_fun(rho_H_grid, k_scales, f_heavy, phis, measured_Is, measured_sigIs,
+                                                  IsigI_cutoff=IsigI_cutoff)
         m_F_next = beta1 * m_F + (1 - beta1) * grad_rho_H_grid
         v_F_next = beta2 * v_F + (1 - beta2) * jnp.square(grad_rho_H_grid)
         t_next = t + 1

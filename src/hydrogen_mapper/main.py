@@ -58,7 +58,7 @@ def main():
     parser.add_argument('--num-recon-iter', type=int, default=5000, help='Number of iterations per map reconstruction')
     parser.add_argument('--oversampling-factor', type=float, default=1.0, help='How many times the density grid is oversampled')
     parser.add_argument('--learning-rate', type=float, default=1e-3, help='Learning rate for Adam optimizer')
-    parser.add_argument('--i-sigi-cutoff', type=float, default=2, help='Minimum signal to noise ratio')
+    parser.add_argument('--i-sigi-cutoff', type=float, default=None, help='Minimum signal to noise ratio')
 
     parser.add_argument('--mtz-out', type=str, default=None, help='.mtz (structure factor) output filename prefix')
     parser.add_argument('--mrc-out', type=str, default=None, help='.mrc (H density map) output filename prefix')
@@ -71,7 +71,8 @@ def main():
     phasing_params = {
         'learning_rate': args.learning_rate,
         'oversampling_factor': args.oversampling_factor,
-        'num_iterations': args.num_recon_iter
+        'num_iterations': args.num_recon_iter,
+        'IsigI_cutoff': args.i_sigi_cutoff,
     }
     loop = ActiveLearningLoop(
         instrument_mask_file=args.instrument_mask,
