@@ -148,7 +148,7 @@ def cost_function_total(rho_H_grid, k_scales, f_heavy, measured_phis, measured_I
     F_tot_q_pred = jnp.stack([f_heavy + phi * F_H_grid for phi in measured_phis])
     I_calc = jnp.abs(F_tot_q_pred)**2
     k_scales_broadcast = jnp.expand_dims(k_scales, axis=tuple(range(1, F_H_grid.ndim + 1)))
-    I_pred = k_scales_broadcast * I_calc
+    I_pred = jnp.exp(k_scales_broadcast) * I_calc
     residuals = jnp.where(measured_sigIs > 0, (I_pred - measured_Is)**2 / (measured_sigIs**2 + 1e-9), 0)
     return jnp.sum(residuals)/jnp.sum(jnp.where(measured_sigIs > 0, 1/measured_sigIs**2, 0))
 
@@ -225,17 +225,14 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
         m_k_hat = m_k_next / (1 - beta1**t_next)
         v_k_hat = v_k_next / (1 - beta2**t_next)
         update_step_k = learning_rate * m_k_hat / (jnp.sqrt(v_k_hat) + epsilon)
-        k_scales_intermediate = k_scales - update_step_k
-
-        # Add positivity constraint for scale factors
-        k_scales_next = jnp.maximum(k_scales_intermediate, 1e-8)
+        k_scales_next = k_scales - update_step_k
 
         error = jnp.linalg.norm(rho_H_grid_next - rho_H_prev_grid) / (jnp.linalg.norm(rho_H_prev_grid) + 1e-9)
         return (rho_H_grid_next, k_scales_next, m_F_next, v_F_next, m_k_next, v_k_next, t_next), error
 
     if grid is None:
         rho_H_grid_init = jnp.zeros(shape=grid_shape, dtype=jnp.complex64)
-        k_scales_init = jnp.ones(shape=measured_Is.shape[0])
+        k_scales_init = jnp.zeros(shape=measured_Is.shape[0])
     else:
         rho_H_grid_init = jnp.array(grid)
         k_scales_init = jnp.array(k_scales)
