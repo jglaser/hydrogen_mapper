@@ -156,7 +156,8 @@ def cost_function_total(rho_H_grid, k_scales, f_heavy, measured_phis, measured_I
         f = jnp.ones_like(measured_Is, dtype=bool)
 
     residuals = jnp.where(f & (measured_sigIs > 0), (I_pred - measured_Is)**2, 0)
-    weights = jnp.where(f & (measured_sigIs > 0), 1 / (measured_sigIs**2 + 1e-9), 0)
+    # weight by relative error
+    weights = jnp.where(f & (measured_sigIs > 0), measured_Is / measured_sigIs, 0)
     return jnp.sum(weights*residuals)/jnp.sum(weights)
 
 @partial(jax.jit, static_argnames=('weight', 'max_iter'))
