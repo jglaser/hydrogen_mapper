@@ -67,8 +67,9 @@ class CoverageCalculator:
 class ActiveLearningLoop:
     """Manages the state and logic for a single active learning experiment."""
 
-    def __init__(self, instrument_mask_file: str, reflection_file: str, pdb_file: str, 
-                 polarization_files_csv: str, mtz_array_label: str, h_only_file: str = None):
+    def __init__(self, instrument_mask_file: str, reflection_file: str, pdb_file: str,
+                 polarization_files_csv: str, mtz_array_label: str, h_only_file: str = None,
+                 n_candidates=20, phasing_params={}):
 
         # --- CCTBX Initialization (same as before) ---
         self.miller_set = any_reflection_file(reflection_file).as_miller_arrays(merge_equivalents=False)[0]
@@ -99,6 +100,9 @@ class ActiveLearningLoop:
         self.unmeasured_data = self.pool_data.copy()
         self.measured_data = pd.DataFrame()
         self.polarization_states = self.pool_data['phi_pol'].unique()
+
+        self.phasing_params = phasing_params
+        self.n_candidates = n_candidates
 
         # --- State Initialization ---
         self.U = np.eye(3) # Assume default orientation matrix for now
@@ -175,6 +179,7 @@ class ActiveLearningLoop:
         self.F_H, self.H_grid, self.k_scales = al.phase_retrieval_adam_direct(
             miller_arrays, self.polarization_states, self.f_heavy_map,
             grid=self.H_grid, k_scales=self.k_scales,
+            **self.phasing_params
         )
 
         # 2. Calculate Current Uncertainty
@@ -183,7 +188,7 @@ class ActiveLearningLoop:
         )
 
         # 3. Score Candidates
-        self._score_candidate_orientations()
+        self._score_candidate_orientations(n_candidates=self.n_candidates)
 
     def _score_candidate_orientations(self, n_candidates=20, epsilon=1.0):
         """Scores candidate states by efficiently calculating the change in the trace of the covariance matrix."""
@@ -236,13 +241,13 @@ class ActiveLearningLoop:
                         combined_consts = cand_group_data['consts']
                         combined_weights = cand_group_data['weights']
                         combined_hkls = cand_group_data['hkls']
-                    
+
                     const_block_new = jnp.array(combined_consts)
                     weight_block_new = jnp.array(combined_weights)
                     hkls_in_block_new = jnp.array(combined_hkls)
                     new_trace_contrib = al._calculate_block_trace_jax(const_block_new, weight_block_new, self.n_voxels, hkls_in_block_new, epsilon)
                     predicted_trace_contrib_total += (new_trace_contrib - old_trace_contrib)
-                
+
                 predicted_trace = ((self.n_voxels - M_candidate) / epsilon) + ((1.0 / epsilon) * predicted_trace_contrib_total)
 
                 if predicted_trace < min_predicted_trace:
@@ -264,5 +269,5 @@ class ActiveLearningLoop:
                 "phi_pol": phi_pol,
                 "U": self.U
             }
-            
+
         self.next_state = best_state

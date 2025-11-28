@@ -46,34 +46,42 @@ def calculate_validation_metrics(F_H_map_recon, f_h_only_ref, miller_set):
 def main():
     parser = argparse.ArgumentParser(description="Run a full active learning simulation for neutron phasing.")
     # --- Arguments are updated ---
-    parser.add_argument('--polarization_files_csv', type=str, required=True, help='CSV file mapping polarization phis to mtz file paths')
-    parser.add_argument('--instrument_mask', type=str, required=True, help='Nexus file (.nxs) with instrument coverage definition.')
-    parser.add_argument("--mtz_file", type=str, required=True, help="A representative MTZ file for crystal info")
-    parser.add_argument("--mtz_array", type=str, required=True, help="Name of the intensity array in the mtz files")
-    parser.add_argument('--pdb_ref', type=str, required=True, help='Reference structure for heavy atoms')
-    parser.add_argument('--h_only_file', type=str, help='Reference structure factor (.mtz) for validation')
-    parser.add_argument('--num_steps', type=int, default=50, help='Number of active learning steps to perform')
+    parser.add_argument('--polarization-files-csv', type=str, required=True, help='CSV file mapping polarization phis to mtz file paths')
+    parser.add_argument('--instrument-mask', type=str, required=True, help='Nexus file (.nxs) with instrument coverage definition.')
+    parser.add_argument("--mtz-file", type=str, required=True, help="A representative MTZ file for crystal info")
+    parser.add_argument("--mtz-array", type=str, required=True, help="Name of the intensity array in the mtz files")
+    parser.add_argument('--pdb-ref', type=str, required=True, help='Reference structure for heavy atoms')
+    parser.add_argument('--h-only-file', type=str, help='Reference structure factor (.mtz) for validation')
+    parser.add_argument('--num-steps', type=int, default=50, help='Number of active learning steps to perform')
 
-    # --- These arguments are no longer used by the loop, but kept for compatibility ---
-    parser.add_argument('--n_candidates', type=int, default=20, help='Number of candidate orientations to score per step')
-    parser.add_argument('--num_recon_iter', type=int, default=500, help='Number of iterations per map reconstruction')
-    parser.add_argument('--oversampling_factor', type=float, default=1.0, help='How many times the density grid is oversampled')
-    parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning rate for Adam optimizer')
+    parser.add_argument('--n-candidates', type=int, default=20, help='Number of candidate orientations to score per step')
+    parser.add_argument('--num-recon-iter', type=int, default=5000, help='Number of iterations per map reconstruction')
+    parser.add_argument('--oversampling-factor', type=float, default=1.0, help='How many times the density grid is oversampled')
+    parser.add_argument('--learning-rate', type=float, default=1e-3, help='Learning rate for Adam optimizer')
+    parser.add_argument('--i-sigi-cutoff', type=float, default=2, help='Minimum signal to noise ratio')
 
-    parser.add_argument('--mtz_out', type=str, default=None, help='.mtz (structure factor) output filename prefix')
-    parser.add_argument('--mrc_out', type=str, default=None, help='.mrc (H density map) output filename prefix')
+    parser.add_argument('--mtz-out', type=str, default=None, help='.mtz (structure factor) output filename prefix')
+    parser.add_argument('--mrc-out', type=str, default=None, help='.mrc (H density map) output filename prefix')
     args = parser.parse_args()
 
     # --- Initialization ---
     # All the complex setup is now handled by the ActiveLearningLoop constructor.
     print("Initializing Active Learning Loop...")
+
+    phasing_params = {
+        'learning_rate': args.learning_rate,
+        'oversampling_factor': args.oversampling_factor,
+        'num_iterations': args.num_recon_iter
+    }
     loop = ActiveLearningLoop(
         instrument_mask_file=args.instrument_mask,
         reflection_file=args.mtz_file,
         pdb_file=args.pdb_ref,
         polarization_files_csv=args.polarization_files_csv,
         mtz_array_label=args.mtz_array,
-        h_only_file=args.h_only_file
+        h_only_file=args.h_only_file,
+        n_candidates=args.n_candidates,
+        phasing_params=phasing_params,
     )
 
     # We can pass external parameters (like from argparse) into the loop if needed

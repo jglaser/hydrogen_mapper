@@ -100,7 +100,7 @@ def _calculate_block_trace_jax(const_block, weight_block, n_voxels, hkls_in_bloc
     G_block = jnp.real(n_voxels * (same_hkl_mask * const_outer_conj + friedel_hkl_mask * const_outer))
     W_block_inv = jnp.diag(1.0 / (weight_block + 1e-9))
     A_block = W_block_inv + (1.0 / epsilon) * G_block
-    A_block_inv = jnp.linalg.inv(A_block)
+    A_block_inv = jnp.linalg.pinv(A_block)
     return jnp.trace(W_block_inv @ A_block_inv)
 
 def calculate_trace_of_covariance_direct_blocked(measured_data, F_H_map, f_heavy_map, p1_indices, n_voxels, epsilon=1.0):
