@@ -148,38 +148,57 @@ def cost_function_total(rho_H_grid, k_scales, f_heavy, measured_phis, measured_I
     F_H_grid = jnp.fft.fftn(rho_H_grid)
     F_tot_q_pred = jnp.stack([f_heavy + phi * F_H_grid for phi in measured_phis])
     I_calc = jnp.abs(F_tot_q_pred)**2
-    k_scales_broadcast = jnp.expand_dims(k_scales, axis=tuple(range(1, F_H_grid.ndim + 1)))
-    I_pred = jnp.exp(k_scales_broadcast) * I_calc
+    scale = jnp.exp(k_scales)
     if IsigI_cutoff is not None:
         f = measured_Is > IsigI_cutoff * measured_sigIs
     else:
         f = jnp.ones_like(measured_Is, dtype=bool)
 
-    residuals = jnp.where(f & (measured_sigIs > 0), (I_pred - measured_Is)**2, 0)
+    residuals = jnp.where(f & (measured_sigIs > 0), (I_calc - measured_Is * scale)**2, 0)
     # weight by relative error
     weights = jnp.where(f & (measured_sigIs > 0), measured_Is / measured_sigIs, 0)
     return jnp.sum(weights*residuals)/jnp.sum(weights)
 
-@partial(jax.jit, static_argnames=('weight', 'max_iter'))
+@partial(jax.jit, static_argnames=('max_iter',))
 def _tv_prox_jax(input_grid, weight, max_iter=50):
-    """JAX implementation of TV-denoising prox operator."""
+    """
+    JAX implementation of TV-denoising prox operator using Chambolle's dual algorithm.
+    Solves min_u 1/2 ||u - g||^2 + weight * TV(u).
+
+    This implementation explicitly handles the 'weight' (lambda) parameter to ensure
+    correct scaling for non-normalized data.
+    """
+    tau = 0.25 # Step size for the dual ascent
+
     def body_fun(_, p):
-        grad_div_p = jnp.zeros_like(input_grid)
+        # div p
+        div_p = jnp.zeros_like(input_grid)
         for i in range(input_grid.ndim):
-            grad_div_p += jnp.roll(p[..., i], -1, axis=i) - p[..., i]
-        g = input_grid - grad_div_p / weight
-        grad_g = jnp.stack([g - jnp.roll(g, 1, axis=i) for i in range(input_grid.ndim)], axis=-1)
-        norm = jnp.sqrt(jnp.sum(grad_g**2, axis=-1, keepdims=True))
-        p_next = (p - 0.25 * weight * grad_g) / (1.0 + 0.25 * norm)
+            div_p += jnp.roll(p[..., i], -1, axis=i) - p[..., i]
+
+        # term = div p - g / lambda
+        term = div_p - input_grid / (weight + 1e-9)
+
+        # grad(term)
+        grad_term = jnp.stack([term - jnp.roll(term, 1, axis=i) for i in range(input_grid.ndim)], axis=-1)
+
+        norm = jnp.sqrt(jnp.sum(grad_term**2, axis=-1, keepdims=True))
+
+        # Chambolle's update: p = (p + tau * grad_term) / (1 + tau * |grad_term|)
+        p_next = (p + tau * grad_term) / (1.0 + tau * norm)
         return p_next
+
     p_initial = jnp.zeros(input_grid.shape + (input_grid.ndim,), dtype=input_grid.dtype)
     p_final = jax.lax.fori_loop(0, max_iter, body_fun, p_initial)
-    final_grad_div_p = jnp.zeros_like(input_grid)
-    for i in range(input_grid.ndim):
-        final_grad_div_p += jnp.roll(p_final[..., i], -1, axis=i) - p_final[..., i]
-    return input_grid - final_grad_div_p
 
-def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
+    final_div_p = jnp.zeros_like(input_grid)
+    for i in range(input_grid.ndim):
+        final_div_p += jnp.roll(p_final[..., i], -1, axis=i) - p_final[..., i]
+
+    # Result: u = g - lambda * div p
+    return input_grid - weight * final_div_p
+
+def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr, I_scale,
                                 grid=None, k_scales=None, num_iterations=500, tol=1e-6,
                                 learning_rate=1e-4, beta1=0.9, beta2=0.999, epsilon=1e-8,
                                 lambda_tv=0.01, oversampling_factor=1.0,
@@ -215,8 +234,9 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
     def adam_body_fun(carry, _):
         rho_H_grid, k_scales, m_F, v_F, m_k, v_k, t = carry
         rho_H_prev_grid = rho_H_grid
-        grad_rho_H_grid, grad_k_scales = grad_fun(rho_H_grid, k_scales, f_heavy, phis, measured_Is, measured_sigIs,
-                                                  IsigI_cutoff=IsigI_cutoff)
+        grad_rho_H_grid, grad_k_scales = grad_fun(rho_H_grid, k_scales,
+            f_heavy, phis, measured_Is, measured_sigIs,
+            IsigI_cutoff=IsigI_cutoff)
         m_F_next = beta1 * m_F + (1 - beta1) * grad_rho_H_grid
         v_F_next = beta2 * v_F + (1 - beta2) * jnp.square(grad_rho_H_grid)
         t_next = t + 1
@@ -225,7 +245,13 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
         update_step = learning_rate * m_F_hat / (jnp.sqrt(v_F_hat) + epsilon)
         rho_H_intermediate = rho_H_grid - update_step
         rho_H_intermediate = rho_H_intermediate.real
-        rho_H_denoised = _tv_prox_jax(rho_H_intermediate, learning_rate * lambda_tv)
+
+        # Adaptive scaling for TV regularization
+        # Scale lambda by the signal magnitude to make regularization scale-invariant
+        scale_factor = jnp.std(rho_H_intermediate) + 1e-9
+        adaptive_lambda = learning_rate * lambda_tv * scale_factor
+
+        rho_H_denoised = _tv_prox_jax(rho_H_intermediate, adaptive_lambda)
         rho_H_grid_next = jnp.array(rho_H_denoised, dtype=jnp.complex64)
 
         # --- Adam update for k_scales ---
@@ -241,7 +267,7 @@ def phase_retrieval_adam_direct(measured_data, phis, f_heavy_arr,
 
     if grid is None:
         rho_H_grid_init = jnp.zeros(shape=grid_shape, dtype=jnp.complex64)
-        k_scales_init = jnp.zeros(shape=measured_Is.shape[0])
+        k_scales_init = -jnp.log(I_scale)
     else:
         rho_H_grid_init = jnp.array(grid)
         k_scales_init = jnp.array(k_scales)

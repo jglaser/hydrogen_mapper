@@ -112,6 +112,7 @@ class ActiveLearningLoop:
         self.H_grid = None
         self.k_scales = None
         self.is_first_step = True
+        self.I_scale = None
         self._calculate_next_step()
 
     def _generate_random_rotation(self) -> np.ndarray:
@@ -176,9 +177,13 @@ class ActiveLearningLoop:
             m = miller.array(self.miller_set, data=flex.double(I), sigmas=flex.double(sigI))
             miller_arrays.append(m)
 
+        if self.I_scale is None:
+            F2_heavy = np.array(self.f_heavy_map.intensities().data())
+            self.I_scale = self.measured_data['I'].std() / np.std(F2_heavy)
+
         self.F_H, self.H_grid, self.k_scales = al.phase_retrieval_adam_direct(
             miller_arrays, self.polarization_states, self.f_heavy_map,
-            grid=self.H_grid, k_scales=self.k_scales,
+            I_scale=self.I_scale, grid=self.H_grid, k_scales=self.k_scales,
             **self.phasing_params
         )
 
